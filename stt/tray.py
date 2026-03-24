@@ -1,9 +1,8 @@
 """System tray icon for speech-to-text daemon."""
 
 import logging
-import os
 import threading
-from typing import Callable
+from typing import Callable, Optional
 
 import gi
 gi.require_version("Gtk", "3.0")
@@ -23,6 +22,12 @@ from gi.repository import Gtk, GLib
 
 log = logging.getLogger(__name__)
 
+AVAILABLE_MODELS = [
+    ("base.en", "Base (fastest, ~140MB VRAM)"),
+    ("small.en", "Small (balanced, ~260MB VRAM)"),
+    ("medium.en", "Medium (accurate, ~800MB VRAM)"),
+]
+
 
 class TrayIcon:
     """System tray icon with status indicator and menu."""
@@ -31,10 +36,17 @@ class TrayIcon:
     ICON_RECORDING = "media-record-symbolic"
     ICON_TRANSCRIBING = "emblem-synchronizing-symbolic"
 
-    def __init__(self, on_quit: Callable[[], None], model_name: str = ""):
+    def __init__(
+        self,
+        on_quit: Callable[[], None],
+        on_model_change: Optional[Callable[[str], None]] = None,
+        model_name: str = "",
+    ):
         self._on_quit = on_quit
+        self._on_model_change = on_model_change
         self._model_name = model_name
         self._status_item = None
+        self._model_items: dict[str, Gtk.RadioMenuItem] = {}
         self._indicator = None
 
         if not HAS_APPINDICATOR:
@@ -56,11 +68,28 @@ class TrayIcon:
         self._status_item.set_sensitive(False)
         menu.append(self._status_item)
 
-        # Model info
-        if model_name:
-            model_item = Gtk.MenuItem(label=f"Model: {model_name}")
-            model_item.set_sensitive(False)
-            menu.append(model_item)
+        menu.append(Gtk.SeparatorMenuItem())
+
+        # Model submenu
+        model_submenu = Gtk.Menu()
+        group = None
+        for model_id, label in AVAILABLE_MODELS:
+            if group is None:
+                item = Gtk.RadioMenuItem(label=label)
+                group = item
+            else:
+                item = Gtk.RadioMenuItem(label=label, group=group)
+
+            if model_id == model_name:
+                item.set_active(True)
+
+            item.connect("toggled", self._on_model_toggled, model_id)
+            self._model_items[model_id] = item
+            model_submenu.append(item)
+
+        model_menu_item = Gtk.MenuItem(label="Model")
+        model_menu_item.set_submenu(model_submenu)
+        menu.append(model_menu_item)
 
         menu.append(Gtk.SeparatorMenuItem())
 
@@ -71,6 +100,21 @@ class TrayIcon:
 
         menu.show_all()
         self._indicator.set_menu(menu)
+
+    def _on_model_toggled(self, item: Gtk.RadioMenuItem, model_id: str):
+        if not item.get_active():
+            return
+        if model_id == self._model_name:
+            return
+        log.info("Model switch requested: %s -> %s", self._model_name, model_id)
+        self._model_name = model_id
+        if self._on_model_change:
+            # Run in a thread so GTK doesn't block during model load
+            threading.Thread(
+                target=self._on_model_change,
+                args=(model_id,),
+                daemon=True,
+            ).start()
 
     def show_recording(self) -> None:
         if self._indicator:
@@ -84,6 +128,10 @@ class TrayIcon:
         if self._indicator:
             GLib.idle_add(self._set_state, self.ICON_IDLE, "Idle")
 
+    def show_loading(self, model_name: str) -> None:
+        if self._indicator:
+            GLib.idle_add(self._set_state, self.ICON_TRANSCRIBING, f"Loading {model_name}...")
+
     def _set_state(self, icon: str, label: str):
         self._indicator.set_icon_full(icon, label)
         if self._status_item:
@@ -93,7 +141,6 @@ class TrayIcon:
     def run(self) -> None:
         """Run GTK main loop. Call from the main thread."""
         if not HAS_APPINDICATOR:
-            # Block forever without GTK
             threading.Event().wait()
             return
         Gtk.main()

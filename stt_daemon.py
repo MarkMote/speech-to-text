@@ -67,6 +67,22 @@ def main():
     transcriber.load()
 
     recorder = Recorder(config.audio)
+    model_lock = threading.Lock()
+
+    def on_model_change(model_name: str):
+        """Switch to a different Whisper model at runtime."""
+        nonlocal transcriber
+        with model_lock:
+            log.info("Switching model to %s...", model_name)
+            if tray:
+                tray.show_loading(model_name)
+            transcriber.unload()
+            config.model.name = model_name
+            transcriber = create_transcriber(config.model)
+            transcriber.load()
+            log.info("Model switched to %s", model_name)
+            if tray:
+                tray.show_idle()
 
     # Try tray icon first, fall back to floating indicator, fall back to nothing
     tray = None
@@ -76,6 +92,7 @@ def main():
         from stt.tray import TrayIcon
         tray = TrayIcon(
             on_quit=lambda: shutdown(),
+            on_model_change=on_model_change,
             model_name=config.model.name,
         )
         log.info("Tray icon enabled")
@@ -130,7 +147,8 @@ def main():
         elif indicator:
             indicator.show_transcribing()
 
-        text = transcriber.transcribe(audio, config.audio.sample_rate)
+        with model_lock:
+            text = transcriber.transcribe(audio, config.audio.sample_rate)
         if text:
             type_text(text, wid, config.output.method, config.output.restore_clipboard)
         else:
