@@ -68,13 +68,25 @@ def main():
 
     recorder = Recorder(config.audio)
 
-    # Try to import indicator, fall back to no-op if GTK not available
+    # Try tray icon first, fall back to floating indicator, fall back to nothing
+    tray = None
+    indicator = None
+
     try:
-        from stt.indicator import Indicator
-        indicator = Indicator(config.indicator)
+        from stt.tray import TrayIcon
+        tray = TrayIcon(
+            on_quit=lambda: shutdown(),
+            model_name=config.model.name,
+        )
+        log.info("Tray icon enabled")
     except Exception as e:
-        log.warning("GTK indicator unavailable: %s. Running without.", e)
-        indicator = None
+        log.warning("Tray icon unavailable: %s", e)
+        try:
+            from stt.indicator import Indicator
+            indicator = Indicator(config.indicator)
+            log.info("Floating indicator enabled")
+        except Exception as e2:
+            log.warning("Indicator also unavailable: %s. Running headless.", e2)
 
     target_window_id = None
     recording_lock = threading.Lock()
@@ -84,7 +96,9 @@ def main():
         with recording_lock:
             target_window_id = get_active_window()
             recorder.start()
-            if indicator:
+            if tray:
+                tray.show_recording()
+            elif indicator:
                 indicator.show_recording()
             log.info("Recording... (window=%s)", target_window_id)
 
@@ -96,18 +110,24 @@ def main():
 
         if audio is None:
             log.info("No audio captured")
-            if indicator:
+            if tray:
+                tray.show_idle()
+            elif indicator:
                 indicator.hide()
             return
 
         duration = len(audio) / config.audio.sample_rate
         if duration < 0.3:
             log.info("Audio too short (%.1fs), ignoring", duration)
-            if indicator:
+            if tray:
+                tray.show_idle()
+            elif indicator:
                 indicator.hide()
             return
 
-        if indicator:
+        if tray:
+            tray.show_transcribing()
+        elif indicator:
             indicator.show_transcribing()
 
         text = transcriber.transcribe(audio, config.audio.sample_rate)
@@ -116,7 +136,9 @@ def main():
         else:
             log.info("Empty transcription")
 
-        if indicator:
+        if tray:
+            tray.show_idle()
+        elif indicator:
             indicator.hide()
 
     listener = HotkeyListener(config.hotkeys, on_press, on_release)
@@ -126,7 +148,9 @@ def main():
         listener.stop()
         recorder.cleanup()
         transcriber.unload()
-        if indicator:
+        if tray:
+            tray.quit()
+        elif indicator:
             indicator.quit()
         sys.exit(0)
 
@@ -136,10 +160,12 @@ def main():
     listener.start()
     log.info("Speech-to-text daemon running. Press hotkey to dictate.")
 
-    if indicator:
-        indicator.run()  # Blocks on GTK main loop
+    # GTK main loop (needed for tray icon or floating indicator)
+    if tray:
+        tray.run()
+    elif indicator:
+        indicator.run()
     else:
-        # No GTK — just wait for the listener thread
         try:
             listener.join()
         except KeyboardInterrupt:
