@@ -1,0 +1,28 @@
+hotkeys:
+  - device_name: "keyd virtual keyboard"
+    key_code: "KEY_F13"
+  - device_name: "keyd virtual keyboard"
+    key_code: "KEY_F19"
+
+model:
+  backend: "faster-whisper"
+  name: "small.en"
+  device: "cuda"
+  compute_type: "int8_float16"
+
+audio:
+  sample_rate: 16000
+  channels: 1
+  device_index: null  # PulseAudio default
+
+indicator:
+  enabled: true
+  position: "top-right"
+  size: 16
+  colors:
+    recording: "#ff4444"
+    transcribing: "#ffaa00"
+
+output:
+  method: "type"           # "paste" (xclip+ctrl+v) or "type" (xdotool type)
+  restore_clipboard: true
