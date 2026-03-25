@@ -25,5 +25,5 @@ indicator:
     transcribing: "#ffaa00"
 
 output:
-  method: "type"           # "paste" (xclip+ctrl+v) or "type" (xdotool type)
+  method: "paste"          # "paste" (xclip + smart ctrl+v/ctrl+shift+v) or "type" (xdotool type, can freeze terminals)
   restore_clipboard: true
