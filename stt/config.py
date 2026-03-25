@@ -24,6 +24,7 @@ class AudioConfig:
     sample_rate: int = 16000
     channels: int = 1
     device_index: Optional[int] = None
+    tail_buffer: float = 0.3  # seconds to keep recording after key release
 
 
 @dataclass
@@ -82,6 +83,7 @@ def load_config(path: str) -> SttConfig:
             sample_rate=a.get("sample_rate", 16000),
             channels=a.get("channels", 1),
             device_index=a.get("device_index"),
+            tail_buffer=a.get("tail_buffer", 0.3),
         )
 
     if "indicator" in raw:

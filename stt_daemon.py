@@ -48,6 +48,30 @@ def _clear_x11_keycodes():
             time.sleep(2)
 
 
+def _start_xmodmap_watchdog():
+    """Periodically re-clear X11 keycodes since GNOME resets them."""
+    def watchdog():
+        while True:
+            time.sleep(30)
+            try:
+                result = subprocess.run(
+                    ["xmodmap", "-pke"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                for keycode in X11_KEYCODES_TO_CLEAR:
+                    line = f"keycode {keycode} ="
+                    for l in result.stdout.splitlines():
+                        if l.startswith(line) and l.strip() != line:
+                            log.info("GNOME reset keycode %d, re-clearing", keycode)
+                            _clear_x11_keycodes()
+                            return
+            except Exception:
+                pass
+
+    t = threading.Thread(target=watchdog, daemon=True)
+    t.start()
+
+
 def main():
     logging.basicConfig(
         level=logging.INFO,
@@ -61,6 +85,7 @@ def main():
 
     # Clear X11 mappings that conflict with our hotkeys
     _clear_x11_keycodes()
+    _start_xmodmap_watchdog()
 
     # Load model (stays in memory)
     transcriber = create_transcriber(config.model)
@@ -121,6 +146,8 @@ def main():
 
     def on_release():
         nonlocal target_window_id
+        # Keep recording briefly to catch trailing words
+        time.sleep(config.audio.tail_buffer)
         with recording_lock:
             audio = recorder.stop()
             wid = target_window_id
